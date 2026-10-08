@@ -1,98 +1,160 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+/**
+ * Benchmark setup.
+ *
+ * @module app/index
+ */
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useRouter } from "expo-router";
+import { useMemo, useState } from "react";
+import { StyleSheet, Text, View } from "react-native";
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+import { Button, Card, Choice, Screen, SectionTitle } from "@/components/ui";
+import { collectDeviceInfo, formatMemory } from "@/lib/metrics/device";
+import {
+  RENDERER_LABELS,
+  RENDERER_NOTES,
+  type RendererId,
+} from "@/lib/metrics/types";
+import { SIZES } from "@/lib/graph/types";
+import { colors, spacing, type } from "@/theme";
+
+const RENDERERS: RendererId[] = ["three-gl", "r3f-native", "skia-2d"];
+
+/** Measurement windows offered. */
+const DURATIONS = [
+  { label: "Quick · 20s", value: 20_000 },
+  { label: "Sustained · 2 min", value: 120_000 },
+] as const;
+
+/**
+ * Choose a renderer and a graph size, then run.
+ *
+ * @returns The setup screen.
+ */
+export default function SetupScreen() {
+  const router = useRouter();
+  const [renderer, setRenderer] = useState<RendererId>("three-gl");
+  const [nodeCount, setNodeCount] = useState<number>(1_000);
+  const [durationMs, setDurationMs] = useState<number>(20_000);
+
+  // Collected once: a device cannot change mid-session, and re-reading memory on every
+  // keystroke would be pointless work.
+  const device = useMemo(() => collectDeviceInfo(), []);
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+    <Screen>
+      <Card>
+        <SectionTitle
+          title="Device"
+          subtitle="Recorded with every run. Frame rates are meaningless without it."
+        />
+        <View style={styles.deviceGrid}>
+          <Text style={styles.deviceLine}>
+            {device.model} · {device.platform} {device.osVersion}
+          </Text>
+          <Text style={styles.deviceLine}>
+            {device.screenWidth}×{device.screenHeight} @{device.pixelRatio}x ·{" "}
+            {formatMemory(device.totalMemoryBytes)}
+          </Text>
+          <Text style={styles.deviceLine}>
+            {device.isDevice
+              ? "Physical device"
+              : "⚠ Emulator — GPU numbers will not transfer to real hardware"}
+          </Text>
+          <Text style={styles.deviceLine}>Expo SDK {device.expoSdk}</Text>
+        </View>
+      </Card>
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+      <View style={styles.group}>
+        <SectionTitle title="Renderer" />
+        {RENDERERS.map((id) => (
+          <Choice
+            key={id}
+            label={RENDERER_LABELS[id]}
+            note={RENDERER_NOTES[id]}
+            selected={renderer === id}
+            onPress={() => setRenderer(id)}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+        ))}
+      </View>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+      <View style={styles.group}>
+        <SectionTitle
+          title="Nodes"
+          subtitle="Links scale with node count — roughly 2–4 per node."
+        />
+        <View style={styles.wrap}>
+          {SIZES.map((size) => (
+            <Choice
+              key={size}
+              label={size.toLocaleString()}
+              selected={nodeCount === size}
+              onPress={() => setNodeCount(size)}
+            />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.group}>
+        <SectionTitle
+          title="Window"
+          subtitle="The sustained window is the one that exposes thermal throttling — a phone can look fine for 20 seconds and fall apart after two minutes."
+        />
+        {DURATIONS.map((option) => (
+          <Choice
+            key={option.value}
+            label={option.label}
+            selected={durationMs === option.value}
+            onPress={() => setDurationMs(option.value)}
+          />
+        ))}
+      </View>
+
+      <Button
+        label="Run benchmark"
+        onPress={() =>
+          router.push({
+            pathname: "/bench",
+            params: {
+              renderer,
+              nodes: String(nodeCount),
+              duration: String(durationMs),
+            },
+          })
+        }
+      />
+
+      <View style={styles.group}>
+        <Button
+          label="View results"
+          variant="ghost"
+          onPress={() => router.push("/results")}
+        />
+        <Button
+          label="Environment diagnostics"
+          variant="ghost"
+          onPress={() => router.push("/diagnostics")}
+        />
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+  group: {
+    gap: spacing.sm,
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
+  wrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+  deviceGrid: {
+    gap: spacing.xs,
   },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  deviceLine: {
+    color: colors.muted,
+    fontSize: type.caption,
+    lineHeight: 16,
   },
 });
